@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+title: Ramp Autonomy
+type: software
+authors:
+  - given-names: Kunal
+    family-names: Yadav
+    email: kunal780954@gmail.com
+repository-code: 'https://github.com/skunal3318/Ramp-Autonomy'
+abstract: Ramp ascent and descent for a loaded wheeled AMR
+license: Apache-2.0
