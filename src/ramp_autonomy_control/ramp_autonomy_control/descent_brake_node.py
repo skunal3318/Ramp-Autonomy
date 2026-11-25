@@ -11,6 +11,16 @@ stays the hard backstop if slip or stability margin gets bad enough
 despite this - this loop is meant to reduce how often HALT needs to
 fire, not replace it.
 
+Leaving DESCENT restores the full ceiling. The parameters this node
+pushes outlive it: it stops acting as soon as the state is not DESCENT,
+but whatever reduced ax_max/az_max it last pushed stay live on
+controller_server, and nav2_param_switcher_node.py will not push over
+them because it owns vx_max/vx_min/wz_max and deliberately not the
+acceleration limits. Without the restore, any descent with enough slip
+to throttle the ceiling left the robot acceleration-limited through
+EXIT and any flat driving after it. The entry and exit rules are in
+descent_brake_policy.py so they can be tested directly.
+
 ===================== Phase 7 (continued): why ax_max/az_max, not vx_max =====================
 Phase 7's first version capped FollowPath.vx_max (the steady-state
 speed ceiling) instead. A later phase-7 pass re-ran both approaches side by side
@@ -111,6 +121,11 @@ from rcl_interfaces.srv import SetParameters
 from rclpy.node import Node
 from std_msgs.msg import Float32, String
 
+from .descent_brake_policy import (
+    POST_HALT_RESTART_FRACTION,
+    ceiling_fraction_for_transition,
+)
+
 CONTROLLER_PLUGIN = 'FollowPath'
 
 # Hysteresis band - see the module docstring for why these specific
@@ -138,11 +153,9 @@ CONTROL_PERIOD_SEC = 0.5
 # FollowPath to stall and give up, which was worse than doing nothing).
 MIN_ACCEL_FRACTION = 0.2
 
-# Fraction of the ceiling to (re-)start at after a slip/margin HALT
-# recovers straight back into DESCENT (state_machine_node.py) rather
-# than through APPROACH - see that node's HALT-recovery comment for why
-# DESCENT specifically needs a cautious restart, not the full ceiling.
-POST_HALT_RESTART_FRACTION = 0.4
+# POST_HALT_RESTART_FRACTION and the rest of the DESCENT entry/exit
+# rules live in descent_brake_policy.py, so they can be tested without
+# rclpy or a running controller_server.
 
 
 def _double_param(name: str, value: float) -> Parameter:
@@ -192,21 +205,26 @@ class DescentBrake(Node):
         self._peak_slip_since_tick = max(self._peak_slip_since_tick, msg.data)
 
     def _on_state(self, msg: String):
+        # self._state is still whatever we're transitioning FROM at this point.
         new_state = msg.data
-        if new_state == 'DESCENT' and self._state != 'DESCENT':
-            # Fresh entry into DESCENT (self._state is still whatever we're
-            # transitioning FROM at this point). Start conservative if that
-            # was a slip/margin HALT; otherwise start unrestricted and let
-            # the control loop throttle down only if slip actually shows up.
-            if self._state == 'HALT':
-                self._ceiling_fraction = POST_HALT_RESTART_FRACTION
+        fraction = ceiling_fraction_for_transition(self._state, new_state)
+
+        if fraction is not None:
+            if new_state == 'DESCENT' and self._state == 'HALT':
                 self.get_logger().warn(
                     f'Re-entering DESCENT after a HALT - starting cautious at '
                     f'{POST_HALT_RESTART_FRACTION:.0%} of the acceleration ceiling'
                 )
-            else:
-                self._ceiling_fraction = 1.0
-            self._push(self._ceiling_fraction)  # apply immediately, don't wait for the next tick
+            elif new_state != 'DESCENT' and self._ceiling_fraction != fraction:
+                # Only worth a line when the ceiling was actually throttled
+                # down, which is the case this restore exists for.
+                self.get_logger().info(
+                    f'Leaving DESCENT for {new_state} - restoring the acceleration '
+                    f'ceiling from {self._ceiling_fraction:.0%} to {fraction:.0%}'
+                )
+            self._ceiling_fraction = fraction
+            self._push(fraction)  # apply immediately, don't wait for the next tick
+
         self._state = new_state
 
     def _on_control_tick(self):

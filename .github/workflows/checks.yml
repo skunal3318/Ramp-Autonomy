@@ -42,9 +42,11 @@ jobs:
       - name: Validation usage tests
         run: python -m unittest validation/test_usage_messages.py -v
 
-      - name: Stability margin tests
+      - name: Control package tests
         working-directory: src/ramp_autonomy_control
-        run: python -m pytest test/test_stability_margin.py -q
+        # Whole directory, not a named file, so a new test file is picked
+        # up by adding it rather than by also remembering to edit this.
+        run: python -m pytest test -q
 
       - name: Validation plot tests
         run: python -m unittest validation/test_plot_validation_run.py -v
