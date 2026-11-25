@@ -1,0 +1,27 @@
+# Third-party Python packages the validation and analysis scripts import
+# directly. See docs/getting-started.md for how to install them, and read the
+# note there before reaching for a virtualenv or pip.
+#
+# Prefer apt. All five are packaged for Ubuntu 24.04, and on a normal ROS 2
+# Jazzy install only python3-pandas is actually missing:
+#
+#   sudo apt install python3-numpy python3-yaml python3-scipy \
+#                    python3-pandas python3-matplotlib
+#
+# Floors, not pins, and deliberately so. ROS 2 Jazzy on Ubuntu 24.04 ships
+# numpy 1.26.4, and rclpy's compiled extensions are built against that ABI.
+# Installing numpy 2.x over the top is a known way to break rclpy, so there is
+# no upper bound here only because there should be no pip install of numpy
+# here at all on a working ROS machine.
+#
+# Direct imports only. Transitive dependencies arrive on their own and only go
+# stale in a file like this.
+
+# Needed to RUN the suite
+numpy>=1.26
+pyyaml>=6.0
+
+# Needed only to ANALYSE its output
+scipy>=1.11
+pandas>=2.1
+matplotlib>=3.6

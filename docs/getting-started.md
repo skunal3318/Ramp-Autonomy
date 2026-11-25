@@ -5,6 +5,35 @@
 ROS2 Jazzy, Gazebo gz-sim 8, and Nav2 (`nav2_controller`, `nav2_lifecycle_manager`, `nav2_velocity_smoother`, `robot_localization`). The MPPI
 critic plugins in `ramp_autonomy_critics` additionally need `libxtensor-dev`.
 
+### Python packages
+
+The validation and analysis scripts import five third-party packages directly. All five are packaged for Ubuntu 24.04, and on a normal
+ROS 2 Jazzy install only `python3-pandas` is actually missing:
+
+```bash
+sudo apt install python3-numpy python3-yaml python3-scipy python3-pandas python3-matplotlib
+```
+
+`numpy` and `pyyaml` are needed to **run** the suite. `scipy`, `pandas` and `matplotlib` are needed only to **analyse** its output, so if
+you just want to watch the robot drive you can skip the last three.
+
+`requirements.txt` lists the same five with version floors, for anyone who would rather use pip. Two things are worth knowing before you do:
+
+- **Do not create a plain virtualenv.** 65 of these scripts import `rclpy`, and a venv made without `--system-site-packages` cannot see the
+  ROS 2 Python packages at all, which turns a missing-package problem into a broken-ROS one:
+
+  ```
+  $ python -m venv venv && source venv/bin/activate
+  $ python -c "import rclpy"
+  ModuleNotFoundError: No module named 'yaml'
+  ```
+
+  If you want a venv, it needs `python -m venv --system-site-packages venv`.
+
+- **Do not pin numpy.** Jazzy on Ubuntu 24.04 ships `python3-numpy` 1.26.4 and `rclpy`'s compiled extensions are built against that ABI.
+  Installing `numpy` 2.x over the top is a known way to break `rclpy`. `requirements.txt` expresses a floor rather than a pin for exactly
+  this reason.
+
 ## Build
 
 ```bash
