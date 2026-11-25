@@ -29,7 +29,10 @@
 <sdf version="1.9">
   <world name="ramp_world_sharp">
 
-    <physics name="1ms" type="ode">
+    <!-- type is not what selects the engine: gz-sim loads dartsim either way,
+         silently, and Harmonic has no ODE at all. See docs/simulation-world.md
+         "Physics engine, and what the friction numbers mean". -->
+    <physics name="1ms" type="dart">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>

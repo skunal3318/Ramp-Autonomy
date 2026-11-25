@@ -65,6 +65,31 @@ real-time factor to about 0.4. Scenery now uses envelope collisions instead of e
 solid base box, not individually modeled tubes), while the robot's lane, ramps, slabs, columns, walls, and barriers keep exact collision
 geometry. That brought max-speed real-time factor from 0.41 to 1.12; during an actual verification run it holds a mean of roughly 0.92-0.93.
 
+## Physics engine, and what the friction numbers mean
+
+**The engine is DART, whatever the world files say.** Every world here carries a `<physics>` element whose `type` attribute
+names an engine, and that attribute does not select anything. Gazebo Harmonic ships `dartsim`, `bullet`, `bullet-featherstone`
+and `tpe`, and loads its default when asked for something else, without a warning. Confirmed by reading the startup log:
+`Loaded [gz::physics::dartsim::Plugin]`. The attribute now reads `dart` so the files describe what runs, but changing it is
+cosmetic: both spellings load the same plugin. See [`#33`](https://github.com/skunal3318/Ramp-Autonomy/issues/33).
+
+**Friction is a contact property, and the engine takes the lower of the two surfaces.** Every `mu` in this project is authored
+on one surface, while the coefficient that governs a contact is derived from both. That derivation was measured by bisecting
+the slide angle of a box on an incline, with the two surfaces deliberately given different values:
+
+- the rule is the **minimum**. Box 0.8 on ramp 0.5 holds at 26° and slides at 27°, bracketing the effective coefficient to
+  [0.4877, 0.5095]. The product (0.400) and both means (above 0.63) are excluded.
+- a body with **no `<surface>` block inherits at least 0.9**. With no block at all, on a ramp of 0.9, it holds at 41° and
+  slides at 43°, which is the ramp's own value returned by the minimum.
+
+The robot's wheel `<collision>` blocks carry no `<surface>` element, so they inherit that default. Every ramp surface in this
+project is authored at 0.45, 0.55 or 0.9, all below it. **So the authored figure is the contact figure in every case**, and the
+friction values quoted throughout these docs mean what they appear to mean.
+
+That is a result rather than an assumption, and it could have gone the other way: had the rule been the product, every contact
+would have been running well below its quoted value. The wheel surface block should still be made explicit rather than
+inherited. Harness, method and full result tables are in [`validation/friction_rule/`](../validation/friction_rule/README.md).
+
 ## Props
 
 22 props populate Floor 1 and a further set populate Floor 2, sourced from real Gazebo Fuel assets - queried against Fuel's own API and checked
