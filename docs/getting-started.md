@@ -2,6 +2,20 @@
 
 ## Requirements
 
+### Option 1: Docker (Recommended)
+The easiest way to get started is using Docker, which includes all dependencies:
+
+```bash
+docker build -t ramp-autonomy .
+docker run --rm -it ramp-autonomy
+```
+
+For GUI mode:
+```bash
+docker run --rm -it --gpus all -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix ramp-autonomy --gui
+```
+
+### Option 2: Native Installation
 ROS2 Jazzy, Gazebo gz-sim 8, and Nav2 (`nav2_controller`, `nav2_lifecycle_manager`, `nav2_velocity_smoother`, `robot_localization`). The MPPI
 critic plugins in `ramp_autonomy_critics` additionally need `libxtensor-dev`.
 
@@ -36,13 +50,40 @@ you just want to watch the robot drive you can skip the last three.
 
 ## Build
 
+### Using Docker (Recommended)
+
+The Docker container is pre-built with all dependencies and the workspace already compiled:
+
+```bash
+docker build -t ramp-autonomy .
+```
+
+### Native Build
+
 ```bash
 cd ramp_autonomy_ws
 colcon build --symlink-install
 source install/setup.bash
 ```
 
+> **Note:** If building natively, ensure you have ROS 2 Jazzy and all dependencies installed first.
+
 ## Run
+
+### Using Docker (Recommended)
+
+Headless mode (default, no GUI):
+```bash
+docker run --rm -it ramp-autonomy
+```
+
+With GUI support:
+```bash
+xhost +local:docker  # Allow Docker to connect to X server
+docker run --rm -it --gpus all -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix ramp-autonomy --gui
+```
+
+### Native Run
 
 ```bash
 # unloaded run, sharp-transition ramp world
@@ -55,6 +96,16 @@ ros2 launch ramp_autonomy_bringup ramp_autonomy_bringup.launch.py \
 # the realistic construction site (the primary test environment since phase 8)
 ros2 launch ramp_autonomy_bringup ramp_autonomy_bringup.launch.py world:=construction_site payload_mass:=100.0
 ```
+
+### Performance Measurement
+
+To measure the real-time factor (RTF) inside the container:
+
+```bash
+docker run --rm -it ramp-autonomy /workspace/ramp_autonomy_ws/src/ramp_autonomy_control/scripts/measure_rtf.py
+```
+
+**Note:** RTF may be lower inside the container compared to native execution. The harness requires RTF ≥ 0.95 for validation runs. If your container RTF is below this threshold, validation tests may fail even if they would pass natively.
 
 Watch `/ramp_state`, `/stability_margin`, and `/wheel_slip` with `ros2 topic echo` or RViz to see the state machine react as the robot crosses a
 ramp.
