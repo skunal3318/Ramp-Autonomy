@@ -15,13 +15,21 @@ command that might not have died):
                host is actually idle (instantaneous CPU, not just the lagging
                load average).
   verify     - AFTER launching, BEFORE any motion: exactly one sim instance,
-               no duplicated node processes, load not starved, and the
-               simulator's real-time factor ~1.0 measured over a window.
+               no duplicated node processes, every REQUIRED_NODES entry
+               actually running, load not starved, and the simulator's
+               real-time factor ~1.0 measured over a window.
   cleanup    - kill every sim/ROS process by PID and prove they are gone.
   monitor    - sample RTF + load during a trial so a starved trial is
-               identifiable afterward instead of silently counted.
+               identifiable afterward instead of silently counted, and watch
+               REQUIRED_NODES so a trial that lost one is not counted at all.
 Every failure prints a loud banner and exits non-zero (2): the caller must
-stop, not run the trial anyway.
+stop, not run the trial anyway. `summarize` grades a finished trial instead
+and exits 3 if it was starved, 4 if it lost a required node. Those are kept
+apart deliberately: a starved trial is a slow one whose numbers may still mean
+something, a trial that lost a required node is not a trial.
+
+None of this is a robot safety system. It does not stop a robot, it stops a
+run from being trusted. See issue #4.
 
 CLI: harness_guard.py {preflight|verify|cleanup|monitor <out.json> [secs]|summarize <out.json>}
 """
@@ -42,6 +50,19 @@ TRIAL_SCRIPTS = ('stall_diagnosis_trials.py', 'stall_highrate_trial.py', 'stall_
                  'drift_trials.py', 'arc_turn_followpath_test_ekf.py', 'validation_test_ekf_groundtruth.py')
 # tool-harness shell wrappers whose command line merely *contains* the launch command
 WRAPPER_MARK = 'shell-snapshots'
+
+# Node executables that must stay alive for the whole of a trial, checked by
+# `monitor`. This is a TEST-HARNESS check, not a robot safety system: it does
+# not stop a robot, it stops a run from being trusted.
+#
+# cmd_vel_watchdog_node is here because it is the sole publisher of the robot's
+# actuation topic, and the gz-sim DiffDrive plugin holds its last target
+# indefinitely when commands stop arriving (verified: the plugin exposes no
+# timeout, stale-command or deadman parameter). So its death does not stop the
+# robot, it freezes the last command and leaves the trial still apparently
+# running. Without this check that run would be recorded as a result. See
+# issue #4, where the actual fix, a consumer that times out, is discussed.
+REQUIRED_NODES = ('cmd_vel_watchdog_node',)
 
 MAX_IDLE_CPU_PCT = 25.0     # host busy % (all cores) allowed before launching a sim
 MAX_LOAD1_IDLE = 12.0       # sanity cap on 1-min load before launch
@@ -95,6 +116,18 @@ def list_procs(include_trial_scripts=False, exclude=None):
         if fam:
             found.append((pid, fam, cmd))
     return found
+
+
+def missing_nodes(required=REQUIRED_NODES):
+    """Which REQUIRED_NODES have no live process, by executable name in the cmdline.
+
+    Matched the same way list_procs() matches everything else, from /proc, never
+    by asking the node whether it is alive. A node that has hung rather than
+    exited still has a PID, so this catches death and not hangs; the RTF and
+    load sampling alongside it is what catches the rest.
+    """
+    live = ' '.join(cmd for _, _, cmd in list_procs())
+    return tuple(n for n in required if n not in live)
 
 
 def load1():
@@ -194,11 +227,14 @@ def verify(world=None, exclude=None, fail_exit=True):
             key = os.path.basename(exe)
             dup[key] = dup.get(key, 0) + 1
     dups = {k: v for k, v in dup.items() if v > NODE_DUP_MAX}
+    absent = tuple(n for n in REQUIRED_NODES if n not in ' '.join(c for _, _, c in procs))
     l1 = load1()
     rtf = measure_rtf(world, 5.0)
     res = dict(n_gz_sim=n_gz, n_ros2_launch=n_launch, duplicate_nodes=dups, load1=round(l1, 2),
-               rtf=None if rtf is None else round(rtf, 3), n_procs=len(procs))
+               rtf=None if rtf is None else round(rtf, 3), n_procs=len(procs),
+               missing_nodes=list(absent))
     problems = []
+    if absent: problems.append(f'required node(s) not running before motion: {", ".join(absent)}')
     if n_gz != 1: problems.append(f'{n_gz} gz sim server processes (need exactly 1)')
     if n_launch != 1: problems.append(f'{n_launch} ros2 launch processes (need exactly 1)')
     if dups: problems.append(f'duplicated node processes: {dups}')
@@ -246,6 +282,11 @@ class HealthMonitor:
     def __init__(self, world=None, period=20.0, out_path=None):
         self.world, self.period, self.out = world, period, out_path
         self.samples = []            # (t, rtf, load1)
+        # First moment a required node was seen to be gone, and which. Recorded
+        # once and never cleared: a node that dies and is somehow restarted
+        # still invalidates the trial, so the first loss is what matters.
+        self.lost_at = None
+        self.lost_nodes = ()
         self._stop = threading.Event()
         self._th = threading.Thread(target=self._run, daemon=True)
 
@@ -258,6 +299,13 @@ class HealthMonitor:
                 self.world = detect_world()
             rtf = measure_rtf(self.world, 4.0)
             self.samples.append((round(time.time(), 1), None if rtf is None else round(rtf, 3), round(load1(), 2)))
+            if self.lost_at is None:
+                gone = missing_nodes()
+                if gone:
+                    self.lost_at, self.lost_nodes = round(time.time(), 1), gone
+                    print(f'\n{"=" * 72}\n  REQUIRED NODE GONE DURING TRIAL: {", ".join(gone)}\n'
+                          f'  This trial is not a result. See issue #4.\n{"=" * 72}\n',
+                          file=sys.stderr, flush=True)
             if self.out:
                 with open(self.out, 'w') as f:
                     json.dump(self.summary(), f)
@@ -282,7 +330,11 @@ class HealthMonitor:
         starved = bool(r) and (min(r) < 0.85 or low >= 2) or (bool(l) and max(l) > 20.0)
         return dict(n=len(self.samples), min_rtf=min(r) if r else None,
                     mean_rtf=round(sum(r) / len(r), 3) if r else None,
-                    max_load1=max(l) if l else None, n_low_rtf=low, starved=starved)
+                    max_load1=max(l) if l else None, n_low_rtf=low, starved=starved,
+                    # Kept separate from 'starved' on purpose: a starved trial is
+                    # a slow one whose numbers may still mean something, a trial
+                    # that lost a required node is not a trial.
+                    lost_nodes=list(self.lost_nodes), lost_at=self.lost_at)
 
 
 def main():
@@ -297,6 +349,20 @@ def main():
         time.sleep(secs); m.stop()
     elif cmd == 'summarize':
         s = json.load(open(sys.argv[2])); print(json.dumps(s))
+        # 4 before 3: losing a required node is the more serious of the two, and
+        # a trial that did both should report the one that voids it outright.
+        if s.get('lost_nodes'):
+            bar = '!' * 78
+            gone = ', '.join(s['lost_nodes'])
+            when = s.get('lost_at')
+            at = '' if when is None else f' (first seen missing at {when})'
+            sys.stderr.write(f'\n{bar}\n'
+                             f'!! TRIAL LOST A REQUIRED NODE - THIS IS NOT A RESULT\n'
+                             f'!! gone: {gone}{at}\n'
+                             f'!! see issue #4\n'
+                             f'{bar}\n\n')
+            sys.stderr.flush()
+            sys.exit(4)
         sys.exit(3 if s.get('starved') else 0)
     else:
         print(__doc__); sys.exit(1)
