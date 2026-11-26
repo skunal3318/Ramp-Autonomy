@@ -31,6 +31,49 @@ height over wheelbase is 0.49, which is tall, and that ratio dominates how much
 braking the uphill wheels tolerate before slipping. A long, low robot will behave
 very differently, in a good way.
 
+### The IMU
+
+Whether IMU pitch tracks a real slope is the single most valuable thing this
+session can tell me, so it is worth being specific about what the IMU has to
+provide and where it should sit.
+
+**It has to publish orientation, not just raw rates.** The EKF fuses orientation
+(roll, pitch, yaw) and angular velocity, and ignores linear acceleration
+entirely. It also treats the orientation as absolute rather than differential.
+An MPU-6050 or similar outputs raw accelerometer and gyro only, so something has
+to turn that into orientation first: `imu_filter_madgwick` is the usual answer,
+or the part's onboard DMP if the driver exposes it.
+
+**On a 6-axis part, expect yaw to drift.** Roll and pitch are referenced to
+gravity and are stable. Yaw has no absolute reference without a magnetometer, so
+it walks. That is fine for the teleop stages below, which are about pitch, and
+not fine for anything heading-dependent later. If the part does have a
+magnetometer, do not lean on it either: nearby motors and structural steel both
+corrupt it.
+
+**Mount it at the body origin,** as close to the robot's centre as the chassis
+allows. In simulation the IMU sits at exactly `xyz="0 0 0" rpy="0 0 0"` relative
+to `base_link`, so matching that keeps the comparison honest and keeps lever-arm
+terms small during turns. 100 Hz is what simulation runs and is plenty.
+
+Three things matter more than the exact spot:
+
+- **Rigid mounting.** A bolted bracket, not foam or double-sided tape.
+  Vibration aliases into the accelerometer and corrupts the gravity estimate,
+  which is the pitch.
+- **Axes aligned to REP-103**, X forward, Y left, Z up. If the chassis will not
+  allow it, put the rotation in the URDF or a static transform rather than
+  leaving it implicit and finding it later as a sign error.
+- **Mounting tilt is the one to be careful about.** A 2 degree mounting error
+  becomes a permanent 2 degree pitch bias, and the whole point of the exercise
+  is measuring pitch. A systematic offset on exactly the quantity under test is
+  the worst kind to have.
+
+So Stage 0 gains two five-minute jobs: park on known-flat floor and log the
+reported pitch for thirty seconds, recording the mean as the zero offset, and
+run the gyro bias calibration at rest in the same session. Everything measured
+afterwards depends on both.
+
 ---
 
 ## The ramp
@@ -79,9 +122,12 @@ cannot kick out.
 
 ## Stages
 
-**Stage 0, no ramp.** Record the five numbers above. Drive a measured straight
-line on flat ground under teleop and compare encoder distance against a tape
-measure. This is the odometry baseline every later number is read against.
+**Stage 0, no ramp.** Record the five numbers above. Zero the IMU: thirty
+seconds of logged pitch on known-flat floor, mean recorded as the offset, plus a
+gyro bias calibration at rest. Then drive a measured straight line on flat
+ground under teleop and compare encoder distance against a tape measure. That is
+the odometry baseline, and the IMU offset is the pitch baseline. Every later
+number is read against one or the other.
 
 **Stage 1, flat ground, loaded.** Same line with the payload mounted. If odometry
 error changes with payload on flat ground, that is worth knowing before a slope
