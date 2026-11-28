@@ -71,6 +71,22 @@ Summed longitudinal force through all four wheel joints:
 Decelerating a 40 kg chassis at 2.105 m/s^2 requires 84.2 N. The joints carry
 2.5 N of it.
 
+That reading is sound, checked against a case where the answer is known. Parked
+on the 16 degree slope the joints have to hold the chassis against gravity, so
+their longitudinal forces must sum to `Mc*g*sin(theta)` = 108.2 N:
+
+| wheel | Fx |
+|---|---|
+| front left | -31.56 N |
+| front right | -29.60 N |
+| rear left | -23.69 N |
+| rear right | -23.20 N |
+| **sum** | **-108.05 N** |
+
+Within 0.15 N of the required value, so the sensor measures longitudinal force
+correctly and the 2.5 N during braking is a real absence of force, not a bad
+reading.
+
 The chassis really is decelerating, so `DiffDrive` is imposing that motion as a
 velocity constraint rather than reacting it through the wheel contacts. No
 longitudinal force at axle height means no pitching moment, which means no
