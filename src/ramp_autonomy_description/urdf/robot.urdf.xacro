@@ -32,6 +32,11 @@
        the default - grep the tree for "cargo_mode" to confirm. -->
   <xacro:arg name="cargo_mode" default="secured"/>
 
+  <!-- Per-wheel force/torque sensors. Measurement only, but four extra sensor
+       publications per step cost real-time factor, so off by default.
+       Used by validation/phase8/load_transfer/ for issue #25. -->
+  <xacro:arg name="wheel_force_sensors" default="false"/>
+
   <xacro:property name="base_mass" value="40.0"/>
   <xacro:property name="base_length" value="0.8"/>
   <xacro:property name="base_width" value="0.6"/>
@@ -424,6 +429,37 @@
       <origin xyz="${x_off} ${y_off} ${wheel_z - base_height/2}" rpy="0 0 0"/>
       <axis xyz="0 1 0"/>
     </joint>
+
+    <!-- Reported in the parent (base_link) frame, not the child: the child is
+         the wheel and it spins, which would rotate the force vector with it. -->
+    <xacro:if value="$(arg wheel_force_sensors)">
+      <gazebo reference="${prefix}_wheel_joint">
+        <sensor name="${prefix}_wheel_ft" type="force_torque">
+          <always_on>true</always_on>
+          <!-- 1 kHz: rigid wheels on rigid ground make contact forces chatter
+               by hundreds of newtons, so the mean needs samples to emerge. -->
+          <update_rate>1000</update_rate>
+          <topic>wheel_ft/${prefix}</topic>
+          <force_torque>
+            <frame>parent</frame>
+            <measure_direction>parent_to_child</measure_direction>
+          </force_torque>
+        </sensor>
+      </gazebo>
+
+      <!-- Ground contact, which is where the braking force is actually applied.
+           The joint sensor above sees it at axle height instead. -->
+      <gazebo reference="${prefix}_wheel_link">
+        <sensor name="${prefix}_wheel_contact" type="contact">
+          <always_on>true</always_on>
+          <update_rate>1000</update_rate>
+          <topic>wheel_contact/${prefix}</topic>
+          <contact>
+            <collision>${prefix}_wheel_link_collision</collision>
+          </contact>
+        </sensor>
+      </gazebo>
+    </xacro:if>
   </xacro:macro>
 
   <xacro:wheel prefix="front_left"  x_off="${wheel_x_off}"  y_off="${wheel_y_off}"/>
